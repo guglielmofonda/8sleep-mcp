@@ -32,16 +32,19 @@ npm run build
 
 ### Get your User ID
 
-The OAuth2 token endpoint (`auth-api.8slp.net/v1/tokens`) requires undocumented client credentials. Use the older login endpoint instead:
-
 ```bash
-curl -s -X POST https://client-api.8slp.net/v1/login \
+curl -s -X POST https://auth-api.8slp.net/v1/tokens \
   -H "Content-Type: application/json" \
-  -H "User-Agent: Eight%20Sleep/1.37 CFNetwork/1408.0.4 Darwin/22.5.0" \
-  -d '{"email":"YOUR_EMAIL","password":"YOUR_PASSWORD"}'
+  -d '{
+    "client_id": "0894c7f33bb94800a03f1f4df13a4f38",
+    "client_secret": "f0954a3ed5763ba3d06834c73731a32f15f168f47d4f164751275def86db0c76",
+    "grant_type": "password",
+    "username": "YOUR_EMAIL",
+    "password": "YOUR_PASSWORD"
+  }'
 ```
 
-The response contains `session.userId` and `session.token`. Save the `userId`.
+The response contains `userId` and `access_token`. Save the `userId`.
 
 ### Claude Desktop config
 
@@ -76,29 +79,29 @@ Create this in the Shortcuts app. It makes two HTTP calls:
 ### Step 1: Authenticate
 
 - **Action:** Get Contents of URL
-- **URL:** `https://client-api.8slp.net/v1/login`
+- **URL:** `https://auth-api.8slp.net/v1/tokens`
 - **Method:** POST
-- **Headers:** `User-Agent: Eight%20Sleep/1.37 CFNetwork/1408.0.4 Darwin/22.5.0`
 - **Body (JSON):**
   ```json
   {
-    "email": "YOUR_EMAIL",
+    "client_id": "0894c7f33bb94800a03f1f4df13a4f38",
+    "client_secret": "f0954a3ed5763ba3d06834c73731a32f15f168f47d4f164751275def86db0c76",
+    "grant_type": "password",
+    "username": "YOUR_EMAIL",
     "password": "YOUR_PASSWORD"
   }
   ```
-- **Next actions:**
-  1. Get Dictionary Value → key `session` → save as variable `session`
-  2. Get Dictionary Value from `session` → key `token` → save as variable `authToken`
+- **Next action:** Get Dictionary Value → key `access_token` → save as variable `authToken`
 
 ### Step 2: Turn off pod
 
 - **Action:** Get Contents of URL
-- **URL:** `https://client-api.8slp.net/v1/users/YOUR_USER_ID/devices/power`
-- **Method:** POST
+- **URL:** `https://client-api.8slp.net/v1/devices/75138788a11393390e253bd53a8c6594fd13e722`
+- **Method:** PUT
 - **Headers:** `Authorization: Bearer [authToken variable]`
 - **Body (JSON):**
   ```json
-  { "on": false }
+  { "leftOn": false, "rightOn": false }
   ```
 
 ### Step 3 (optional): Notification

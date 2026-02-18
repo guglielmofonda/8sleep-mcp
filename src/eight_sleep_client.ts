@@ -2,11 +2,9 @@ import axios, { AxiosInstance, AxiosError } from 'axios';
 import { config } from './config.js';
 
 interface AuthResponse {
-  session: {
-    token: string;
-    userId: string;
-    expirationDate: string;
-  };
+  access_token: string;
+  expires_in: number;
+  userId: string;
 }
 
 export interface SleepStages {
@@ -58,6 +56,7 @@ export interface UserPreferences {
 export class EightSleepClient {
   private token: string | null = null;
   private userId: string | null = null;
+  private deviceId: string | null = null;
   private client: AxiosInstance;
   private authClient: AxiosInstance;
 
@@ -66,7 +65,7 @@ export class EightSleepClient {
       baseURL: config.api.baseUrl,
       headers: {
         'Content-Type': 'application/json',
-        'User-Agent': 'Eight%20Sleep/1.37 CFNetwork/1408.0.4 Darwin/22.5.0',
+        'User-Agent': 'Eight Sleep MCP Client/1.0',
         'Accept': 'application/json',
       },
     });
@@ -75,7 +74,7 @@ export class EightSleepClient {
       baseURL: config.api.authUrl,
       headers: {
         'Content-Type': 'application/json',
-        'User-Agent': 'Eight%20Sleep/1.37 CFNetwork/1408.0.4 Darwin/22.5.0',
+        'User-Agent': 'Eight Sleep MCP Client/1.0',
         'Accept': 'application/json',
       },
     });
@@ -117,17 +116,22 @@ export class EightSleepClient {
     }
 
     try {
-      const response = await this.authClient.post<AuthResponse>('', {
-        email: config.auth.email,
+      const payload = {
+        client_id: config.auth.clientId,
+        client_secret: config.auth.clientSecret,
+        grant_type: 'password',
+        username: config.auth.email,
         password: config.auth.password,
-      });
+      };
 
-      if (!response.data.session?.token) {
+      const response = await this.authClient.post<AuthResponse>('', payload);
+
+      if (!response.data.access_token) {
         throw new Error('Invalid authentication response from Eight Sleep');
       }
 
-      this.token = response.data.session.token;
-      this.userId = config.auth.userId || response.data.session.userId;
+      this.token = response.data.access_token;
+      this.userId = config.auth.userId;
     } catch (error) {
       if (error instanceof AxiosError) {
         throw new Error(`Failed to authenticate with Eight Sleep: ${error.response?.data?.message || error.message}`);
@@ -275,8 +279,12 @@ export class EightSleepClient {
 
   async getPresence(userId: string): Promise<boolean> {
     try {
-      const response = await this.client.get(`/users/${userId}/presence`);
-      return response.data.presence || false;
+      const today = new Date().toISOString().split('T')[0];
+      const response = await this.client.get(`/users/${userId}/trends`, {
+        params: { tz: 'America/Los_Angeles', from: today, to: today, 'include-main': 'false', 'include-all-sessions': 'true', 'model-version': 'v2' }
+      });
+      const days = response.data.days || [];
+      return days.length > 0 && (days[0].presenceDuration ?? 0) > 0;
     } catch (error) {
       if (error instanceof AxiosError) {
         throw new Error(`Failed to get presence: ${error.response?.data?.message || error.message}`);
@@ -323,13 +331,30 @@ export class EightSleepClient {
   }
 
   // Device Control
+  private async resolveDeviceId(userId: string): Promise<string> {
+    if (this.deviceId) return this.deviceId;
+    const response = await this.client.get(`/users/${userId}/current-device`);
+    this.deviceId = response.data.id;
+    return this.deviceId!;
+  }
+
   async getDeviceStatus(userId: string): Promise<DeviceStatus> {
-    const response = await this.client.get(`/users/${userId}/devices/status`);
-    return response.data.status;
+    const deviceId = await this.resolveDeviceId(userId);
+    const response = await this.client.get(`/devices/${deviceId}`);
+    const d = response.data.result;
+    return {
+      online: d.online ?? true,
+      firmwareVersion: d.firmwareVersion ?? d.firmwareInfo?.currentVersion ?? 'unknown',
+      lastSeen: d.lastHeard,
+      waterLevel: d.waterLevel,
+      processing: d.processing
+    };
   }
 
   async setDevicePower(userId: string, on: boolean): Promise<void> {
-    await this.client.post(`/users/${userId}/devices/power`, { on });
+    const deviceId = await this.resolveDeviceId(userId);
+    // Solo pod: user is mapped to left side; send both to be safe
+    await this.client.put(`/devices/${deviceId}`, { leftOn: on, rightOn: on });
   }
 
   // Additional Sleep Data
