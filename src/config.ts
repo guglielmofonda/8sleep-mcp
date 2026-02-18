@@ -5,7 +5,7 @@ dotenv.config();
 export const config = {
   api: {
     baseUrl: 'https://client-api.8slp.net/v1',
-    authUrl: 'https://auth-api.8slp.net/v1/tokens',
+    authUrl: 'https://client-api.8slp.net/v1/login',
   },
   auth: {
     email: process.env.EIGHT_SLEEP_EMAIL || '',

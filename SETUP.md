@@ -32,14 +32,16 @@ npm run build
 
 ### Get your User ID
 
+The OAuth2 token endpoint (`auth-api.8slp.net/v1/tokens`) requires undocumented client credentials. Use the older login endpoint instead:
+
 ```bash
-curl -s -X POST https://auth-api.8slp.net/v1/tokens \
+curl -s -X POST https://client-api.8slp.net/v1/login \
   -H "Content-Type: application/json" \
-  -d '{"client_id":"","client_secret":"","grant_type":"password","username":"YOUR_EMAIL","password":"YOUR_PASSWORD"}' \
-  | python3 -m json.tool
+  -H "User-Agent: Eight%20Sleep/1.37 CFNetwork/1408.0.4 Darwin/22.5.0" \
+  -d '{"email":"YOUR_EMAIL","password":"YOUR_PASSWORD"}'
 ```
 
-Save the `userId` from the response.
+The response contains `session.userId` and `session.token`. Save the `userId`.
 
 ### Claude Desktop config
 
@@ -74,19 +76,19 @@ Create this in the Shortcuts app. It makes two HTTP calls:
 ### Step 1: Authenticate
 
 - **Action:** Get Contents of URL
-- **URL:** `https://auth-api.8slp.net/v1/tokens`
+- **URL:** `https://client-api.8slp.net/v1/login`
 - **Method:** POST
+- **Headers:** `User-Agent: Eight%20Sleep/1.37 CFNetwork/1408.0.4 Darwin/22.5.0`
 - **Body (JSON):**
   ```json
   {
-    "client_id": "",
-    "client_secret": "",
-    "grant_type": "password",
-    "username": "YOUR_EMAIL",
+    "email": "YOUR_EMAIL",
     "password": "YOUR_PASSWORD"
   }
   ```
-- **Next action:** Get Dictionary Value → key `access_token` → save as variable `authToken`
+- **Next actions:**
+  1. Get Dictionary Value → key `session` → save as variable `session`
+  2. Get Dictionary Value from `session` → key `token` → save as variable `authToken`
 
 ### Step 2: Turn off pod
 

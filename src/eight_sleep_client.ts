@@ -2,9 +2,11 @@ import axios, { AxiosInstance, AxiosError } from 'axios';
 import { config } from './config.js';
 
 interface AuthResponse {
-  access_token: string;
-  expires_in: number;
-  userId: string;
+  session: {
+    token: string;
+    userId: string;
+    expirationDate: string;
+  };
 }
 
 export interface SleepStages {
@@ -64,7 +66,7 @@ export class EightSleepClient {
       baseURL: config.api.baseUrl,
       headers: {
         'Content-Type': 'application/json',
-        'User-Agent': 'Eight Sleep MCP Client/1.0',
+        'User-Agent': 'Eight%20Sleep/1.37 CFNetwork/1408.0.4 Darwin/22.5.0',
         'Accept': 'application/json',
       },
     });
@@ -73,7 +75,7 @@ export class EightSleepClient {
       baseURL: config.api.authUrl,
       headers: {
         'Content-Type': 'application/json',
-        'User-Agent': 'Eight Sleep MCP Client/1.0',
+        'User-Agent': 'Eight%20Sleep/1.37 CFNetwork/1408.0.4 Darwin/22.5.0',
         'Accept': 'application/json',
       },
     });
@@ -115,22 +117,17 @@ export class EightSleepClient {
     }
 
     try {
-      const payload = {
-        client_id: config.auth.clientId,
-        client_secret: config.auth.clientSecret,
-        grant_type: 'password',
-        username: config.auth.email,
+      const response = await this.authClient.post<AuthResponse>('', {
+        email: config.auth.email,
         password: config.auth.password,
-      };
+      });
 
-      const response = await this.authClient.post<AuthResponse>('', payload);
-
-      if (!response.data.access_token) {
+      if (!response.data.session?.token) {
         throw new Error('Invalid authentication response from Eight Sleep');
       }
 
-      this.token = response.data.access_token;
-      this.userId = config.auth.userId;
+      this.token = response.data.session.token;
+      this.userId = config.auth.userId || response.data.session.userId;
     } catch (error) {
       if (error instanceof AxiosError) {
         throw new Error(`Failed to authenticate with Eight Sleep: ${error.response?.data?.message || error.message}`);
