@@ -57,6 +57,7 @@ export class EightSleepClient {
   private token: string | null = null;
   private userId: string | null = null;
   private deviceId: string | null = null;
+  private authPromise: Promise<void> | null = null;
   private client: AxiosInstance;
   private authClient: AxiosInstance;
 
@@ -82,7 +83,10 @@ export class EightSleepClient {
     // Add request interceptor to include auth token
     this.client.interceptors.request.use(async (config) => {
       if (!this.token) {
-        await this.authenticate();
+        if (!this.authPromise) {
+          this.authPromise = this.authenticate().finally(() => { this.authPromise = null; });
+        }
+        await this.authPromise;
       }
       if (config.headers && this.token) {
         config.headers['Authorization'] = `Bearer ${this.token}`;
