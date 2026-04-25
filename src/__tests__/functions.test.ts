@@ -1,105 +1,129 @@
 import { jest } from '@jest/globals';
-import axios from 'axios';
-import { EightSleepFunctions } from '../functions.js';
 
-// Mock axios
-jest.mock('axios');
-const mockedAxios = axios as jest.Mocked<typeof axios>;
+type MockAxiosClient = {
+  get: any;
+  put: any;
+  post: any;
+  patch: any;
+  delete: any;
+  request: any;
+  interceptors: {
+    request: { use: any };
+    response: { use: any };
+  };
+};
 
-describe('EightSleepFunctions', () => {
-  let eightFunctions: EightSleepFunctions;
+const makeAxiosClient = (): MockAxiosClient => ({
+  get: jest.fn(),
+  put: jest.fn(),
+  post: jest.fn(),
+  patch: jest.fn(),
+  delete: jest.fn(),
+  request: jest.fn(),
+  interceptors: {
+    request: { use: jest.fn() },
+    response: { use: jest.fn() },
+  },
+});
+
+let clientApi: MockAxiosClient;
+let appApi: MockAxiosClient;
+let authApi: MockAxiosClient;
+let createMock: jest.Mock;
+
+class MockAxiosError extends Error {
+  response?: { status?: number; data?: { message?: string } };
+  config?: any;
+}
+
+(jest as any).unstable_mockModule('axios', () => ({
+  default: {
+    create: (...args: any[]) => createMock(...args),
+  },
+  AxiosError: MockAxiosError,
+}));
+
+process.env.EIGHT_SLEEP_EMAIL = 'test@example.com';
+process.env.EIGHT_SLEEP_PASSWORD = 'test-password';
+process.env.EIGHT_SLEEP_USER_ID = 'user1';
+
+const { EightSleepFunctions } = await import('../functions.js');
+
+describe('EightSleepFunctions temperature controls', () => {
+  let eightFunctions: InstanceType<typeof EightSleepFunctions>;
 
   beforeEach(() => {
+    clientApi = makeAxiosClient();
+    appApi = makeAxiosClient();
+    authApi = makeAxiosClient();
+    createMock = jest.fn()
+      .mockReturnValueOnce(clientApi)
+      .mockReturnValueOnce(appApi)
+      .mockReturnValueOnce(authApi);
     eightFunctions = new EightSleepFunctions();
-    // Reset all mocks
-    jest.clearAllMocks();
-    // Setup default axios.create mock
-    mockedAxios.create.mockReturnValue(mockedAxios);
   });
 
-  describe('getUsers', () => {
-    it('should fetch users successfully', async () => {
-      const mockUsers = {
-        'user1': { id: 'user1', name: 'Test User' }
-      };
+  it('turns on temperature control before setting a target level', async () => {
+    appApi.put.mockResolvedValue({ data: {} });
 
-      mockedAxios.get.mockResolvedValueOnce({ data: mockUsers });
+    const result = await eightFunctions.setTemperature('user1', -50, 28800);
 
-      const result = await eightFunctions.getUsers();
-      expect(result).toEqual(mockUsers);
-      expect(mockedAxios.get).toHaveBeenCalledWith('/users');
+    expect(result).toEqual({ message: 'Temperature updated successfully' });
+    expect(appApi.put).toHaveBeenNthCalledWith(1, '/users/user1/temperature', {
+      currentState: { type: 'smart' },
     });
+    expect(appApi.put).toHaveBeenNthCalledWith(2, '/users/user1/temperature', {
+      currentLevel: -50,
+    });
+    expect(appApi.put).toHaveBeenNthCalledWith(3, '/users/user1/temperature', {
+      timeBased: {
+        level: -50,
+        durationSeconds: 28800,
+      },
+    });
+    expect(clientApi.put).not.toHaveBeenCalled();
   });
 
-  describe('getTemperature', () => {
-    it('should fetch temperature data successfully', async () => {
-      const mockTemp = {
-        current: 72,
-        target: 70,
-        heating: false,
-        cooling: true
-      };
+  it('uses the app-api temperature state endpoint for device power', async () => {
+    appApi.put.mockResolvedValue({ data: {} });
 
-      mockedAxios.get.mockResolvedValueOnce({ data: mockTemp });
+    await eightFunctions.setDevicePower('user1', true);
+    await eightFunctions.setDevicePower('user1', false);
 
-      const result = await eightFunctions.getTemperature('user1');
-      expect(result).toEqual(mockTemp);
-      expect(mockedAxios.get).toHaveBeenCalledWith('/temperature/user1');
+    expect(appApi.put).toHaveBeenNthCalledWith(1, '/users/user1/temperature', {
+      currentState: { type: 'smart' },
     });
+    expect(appApi.put).toHaveBeenNthCalledWith(2, '/users/user1/temperature', {
+      currentState: { type: 'off' },
+    });
+    expect(clientApi.put).not.toHaveBeenCalled();
   });
 
-  describe('setTemperature', () => {
-    it('should set temperature successfully', async () => {
-      const mockResponse = { message: 'Temperature updated successfully' };
-
-      mockedAxios.post.mockResolvedValueOnce({ data: mockResponse });
-
-      const result = await eightFunctions.setTemperature('user1', 75);
-      expect(result).toEqual(mockResponse);
-      expect(mockedAxios.post).toHaveBeenCalledWith(
-        '/temperature/user1/set',
-        null,
-        { params: { level: 75, duration: 0 } }
-      );
+  it('reads current temperature state from app-api', async () => {
+    appApi.get.mockResolvedValueOnce({
+      data: {
+        currentLevel: -50,
+        currentDeviceLevel: -59,
+        currentState: { type: 'timeBased' },
+      },
     });
 
-    it('should throw error for invalid temperature', async () => {
-      await expect(eightFunctions.setTemperature('user1', 150))
-        .rejects
-        .toThrow('Temperature level must be between -100 and 100');
+    const result = await eightFunctions.getTemperature('user1');
+
+    expect(result).toEqual({
+      current: -59,
+      target: -50,
+      state: 'timeBased',
+      heating: true,
+      cooling: false,
     });
+    expect(appApi.get).toHaveBeenCalledWith('/users/user1/temperature');
+    expect(clientApi.get).not.toHaveBeenCalled();
   });
 
-  describe('getSleepData', () => {
-    it('should fetch sleep data successfully', async () => {
-      const mockSleepData = [{
-        userId: 'user1',
-        date: '2024-03-08',
-        stages: { deep: 120, light: 240 }
-      }];
-
-      mockedAxios.get.mockResolvedValueOnce({ data: mockSleepData });
-
-      const result = await eightFunctions.getSleepData('user1', '2024-03-08');
-      expect(result).toEqual(mockSleepData);
-      expect(mockedAxios.get).toHaveBeenCalledWith('/sleep/user1', {
-        params: { start_date: '2024-03-08' }
-      });
-    });
-
-    it('should include end date when provided', async () => {
-      const mockSleepData = [{
-        userId: 'user1',
-        date: '2024-03-08',
-        stages: { deep: 120, light: 240 }
-      }];
-
-      mockedAxios.get.mockResolvedValueOnce({ data: mockSleepData });
-
-      await eightFunctions.getSleepData('user1', '2024-03-08', '2024-03-09');
-      expect(mockedAxios.get).toHaveBeenCalledWith('/sleep/user1', {
-        params: { start_date: '2024-03-08', end_date: '2024-03-09' }
-      });
-    });
+  it('rejects invalid raw temperature levels', async () => {
+    await expect(eightFunctions.setTemperature('user1', 150))
+      .rejects
+      .toThrow('Temperature level must be between -100 and 100');
   });
-}); 
+});

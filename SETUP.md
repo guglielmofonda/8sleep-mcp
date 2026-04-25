@@ -96,13 +96,32 @@ Create this in the Shortcuts app. It makes two HTTP calls:
 ### Step 2: Turn off pod
 
 - **Action:** Get Contents of URL
-- **URL:** `https://client-api.8slp.net/v1/devices/75138788a11393390e253bd53a8c6594fd13e722`
+- **URL:** `https://app-api.8slp.net/v1/users/YOUR_USER_ID/temperature`
 - **Method:** PUT
 - **Headers:** `Authorization: Bearer [authToken variable]`
 - **Body (JSON):**
   ```json
-  { "leftOn": false, "rightOn": false }
+  { "currentState": { "type": "off" } }
   ```
+
+The same app API endpoint is also the working path for temperature control:
+
+- Turn on temperature control:
+  ```json
+  { "currentState": { "type": "smart" } }
+  ```
+- Set target level:
+  ```json
+  { "currentLevel": -50 }
+  ```
+- Optional timed hold:
+  ```json
+  { "timeBased": { "level": -50, "durationSeconds": 28800 } }
+  ```
+
+Eight Sleep temperature values are raw levels from `-100` to `100`, not literal °C/°F. Known useful mappings: `-50 ≈ 21°C`, `-25 ≈ 24°C`, `-8 ≈ 26°C`, `0 ≈ 27°C`.
+
+Do not use `client-api.8slp.net/v1/devices/<DEVICE_ID>` with `leftOn`/`rightOn` for Pod power. It can return success without changing the Pod state in the app.
 
 ### Step 3 (optional): Notification
 
@@ -135,7 +154,7 @@ Test by running the shortcut manually and confirming the pod turns off.
 | Auth API returns 401 | Wrong email/password, or Eight Sleep account uses SSO (Google/Apple login) — set a password via the Eight Sleep app first |
 | Shortcut fails | Run manually with Shortcuts debug; check `access_token` variable is populated |
 | HomeKit automation doesn't fire | Confirm Home Hub is online. Check "Ask Before Running" is OFF. Test outside 6–10am window won't trigger — expected |
-| Pod doesn't turn off | Test Shortcut in isolation. Verify user ID is correct in Step 2 URL |
+| Pod doesn't turn off | Use `app-api.8slp.net/v1/users/YOUR_USER_ID/temperature` with `{ "currentState": { "type": "off" } }`; the old `client-api /devices` `leftOn`/`rightOn` path can return false success |
 | ~15 second delay | Normal — Hue Bridge → HomeKit → Shortcut → API chain. Not reduceable easily |
 
 ---
