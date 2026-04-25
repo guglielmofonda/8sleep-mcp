@@ -59,6 +59,7 @@ export class EightSleepClient {
   private deviceId: string | null = null;
   private authPromise: Promise<void> | null = null;
   private client: AxiosInstance;
+  private appClient: AxiosInstance;
   private authClient: AxiosInstance;
 
   constructor() {
@@ -71,6 +72,17 @@ export class EightSleepClient {
       },
     });
 
+    const appHeaders = {
+      'Content-Type': 'application/json',
+      'User-Agent': 'Eight Sleep MCP Client/1.0',
+      'Accept': 'application/json',
+    };
+
+    this.appClient = axios.create({
+      baseURL: config.api.appUrl,
+      headers: appHeaders,
+    });
+
     this.authClient = axios.create({
       baseURL: config.api.authUrl,
       headers: {
@@ -80,37 +92,46 @@ export class EightSleepClient {
       },
     });
 
-    // Add request interceptor to include auth token
-    this.client.interceptors.request.use(async (config) => {
+    const addAuthToken = async (requestConfig: any) => {
       if (!this.token) {
         if (!this.authPromise) {
           this.authPromise = this.authenticate().finally(() => { this.authPromise = null; });
         }
         await this.authPromise;
       }
-      if (config.headers && this.token) {
-        config.headers['Authorization'] = `Bearer ${this.token}`;
+      if (requestConfig.headers && this.token) {
+        requestConfig.headers['Authorization'] = `Bearer ${this.token}`;
       }
-      return config;
-    });
+      return requestConfig;
+    };
+
+    // Add request interceptor to include auth token
+    this.client.interceptors.request.use(addAuthToken);
+    this.appClient.interceptors.request.use(addAuthToken);
+
+    const handleExpiredToken = (client: AxiosInstance) => async (error: AxiosError) => {
+      if (error.response?.status === 401) {
+        // Token might be expired, try to re-authenticate
+        this.token = null;
+        await this.authenticate();
+        // Retry the original request with the same client that made it.
+        const requestConfig = error.config;
+        if (requestConfig && this.token) {
+          requestConfig.headers['Authorization'] = `Bearer ${this.token}`;
+          return client.request(requestConfig);
+        }
+      }
+      throw error;
+    };
 
     // Add response interceptor to handle token expiration
     this.client.interceptors.response.use(
       (response) => response,
-      async (error: AxiosError) => {
-        if (error.response?.status === 401) {
-          // Token might be expired, try to re-authenticate
-          this.token = null;
-          await this.authenticate();
-          // Retry the original request
-          const config = error.config;
-          if (config && this.token) {
-            config.headers['Authorization'] = `Bearer ${this.token}`;
-            return this.client.request(config);
-          }
-        }
-        throw error;
-      }
+      handleExpiredToken(this.client)
+    );
+    this.appClient.interceptors.response.use(
+      (response) => response,
+      handleExpiredToken(this.appClient)
     );
   }
 
@@ -165,17 +186,19 @@ export class EightSleepClient {
   async getCurrentTempData(userId: string): Promise<any> {
     try {
       // First get the user's current device data
-      const userResponse = await this.client.get(`/users/${userId}/temperature`);
+      const userResponse = await this.appClient.get(`/users/${userId}/temperature`);
       
       // Get the current temperature data
-      const currentTemp = userResponse.data.currentState.level;
+      const currentTemp = userResponse.data.currentDeviceLevel ?? userResponse.data.currentLevel;
       const targetTemp = userResponse.data.currentLevel;
+      const stateType = userResponse.data.currentState?.type;
       
       return {
         current: currentTemp,
         target: targetTemp,
-        heating: targetTemp > 0,
-        cooling: targetTemp < 0
+        state: stateType,
+        heating: stateType !== 'off' && targetTemp > currentTemp,
+        cooling: stateType !== 'off' && targetTemp < currentTemp
       };
     } catch (error) {
       if (error instanceof AxiosError) {
@@ -187,14 +210,18 @@ export class EightSleepClient {
 
   async setTempLevel(userId: string, level: number, duration: number = 0): Promise<any> {
     try {
-      // First set the base temperature level
-      await this.client.put(`/users/${userId}/temperature`, {
+      // Turn on temperature control, then set the base temperature level.
+      await this.appClient.put(`/users/${userId}/temperature`, {
+        currentState: { type: 'smart' }
+      });
+
+      await this.appClient.put(`/users/${userId}/temperature`, {
         currentLevel: level
       });
 
       // Then set the duration if specified
       if (duration > 0) {
-        await this.client.put(`/users/${userId}/temperature`, {
+        await this.appClient.put(`/users/${userId}/temperature`, {
           timeBased: {
             level: level,
             durationSeconds: duration
@@ -356,9 +383,9 @@ export class EightSleepClient {
   }
 
   async setDevicePower(userId: string, on: boolean): Promise<void> {
-    const deviceId = await this.resolveDeviceId(userId);
-    // Solo pod: user is mapped to left side; send both to be safe
-    await this.client.put(`/devices/${deviceId}`, { leftOn: on, rightOn: on });
+    await this.appClient.put(`/users/${userId}/temperature`, {
+      currentState: { type: on ? 'smart' : 'off' }
+    });
   }
 
   // Additional Sleep Data

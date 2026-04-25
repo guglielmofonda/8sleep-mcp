@@ -52,10 +52,12 @@ Create a `.env` file:
 # Eight Sleep Authentication
 EIGHT_SLEEP_EMAIL=your_email
 EIGHT_SLEEP_PASSWORD=your_password
-EIGHT_SLEEP_USER_ID=your_user_id  # Required: Add the userId from one of the methods above
+EIGHT_SLEEP_USER_ID=your_user_id
 EIGHT_SLEEP_CLIENT_ID=your_client_id
 EIGHT_SLEEP_CLIENT_SECRET=your_client_secret
 ```
+
+> **Important:** `EIGHT_SLEEP_EMAIL`, `EIGHT_SLEEP_PASSWORD`, and `EIGHT_SLEEP_USER_ID` are all required by the current client. The user ID lets tools target the right user, but the server still authenticates with email/password to obtain an access token.
 
 ### Claude Desktop Integration
 Add to Claude Desktop's config (Settings → Developer → Edit Config):
@@ -67,11 +69,11 @@ Add to Claude Desktop's config (Settings → Developer → Edit Config):
             "command": "node",
             "args": ["/absolute/path/to/eight-sleep-mcp/build/index.js"],
             "env": {
-                "EIGHT_SLEEP_EMAIL": "your_email", // email and password not required once you have userid
-                "EIGHT_SLEEP_PASSWORD": "your_password", // email and password not required once you have userid
+                "EIGHT_SLEEP_EMAIL": "your_email",
+                "EIGHT_SLEEP_PASSWORD": "your_password",
                 "EIGHT_SLEEP_USER_ID": "your_user_id",
-                "EIGHT_SLEEP_CLIENT_ID": "your_client_id", // optional
-                "EIGHT_SLEEP_CLIENT_SECRET": "your_client_secret" // optional
+                "EIGHT_SLEEP_CLIENT_ID": "your_client_id",
+                "EIGHT_SLEEP_CLIENT_SECRET": "your_client_secret"
             }
         }
     }
@@ -96,7 +98,7 @@ Restart Claude Desktop after saving.
 
 ### Temperature Control
 - `getTemperature` - Get current temperature settings
-- `setTemperature` - Set immediate temperature (-100 to 100)
+- `setTemperature` - Set immediate temperature raw level (-100 to 100)
 - `getTemperatureSchedules` - Get temperature schedules
 - `setTemperatureSchedule` - Create temperature schedule
 - `updateTemperatureSchedule` - Update temperature schedule
@@ -128,13 +130,31 @@ getSleepData({
 })
 ```
 
-For temperature settings:
+For temperature settings, Eight Sleep uses raw heating/cooling levels, not literal °C/°F:
 ```typescript
 setTemperature({
-  level: 50,  // -100 to 100
+  level: -50,  // raw level -100 to 100; about 21°C / 70°F
   duration: 3600  // seconds, optional
 })
 ```
+
+Useful conversions from the community pyEight lookup table:
+
+| Celsius | Raw level |
+|---:|---:|
+| 21°C | -50 |
+| 24°C | -25 |
+| 26°C | -8 |
+| 27°C | 0 |
+
+The server uses Eight Sleep's app API for temperature control:
+
+- Turn on: `PUT https://app-api.8slp.net/v1/users/<USER_ID>/temperature` with `{ "currentState": { "type": "smart" } }`
+- Set target: same endpoint with `{ "currentLevel": <raw_level> }`
+- Optional duration: same endpoint with `{ "timeBased": { "level": <raw_level>, "durationSeconds": <seconds> } }`
+- Turn off: same endpoint with `{ "currentState": { "type": "off" } }`
+
+Do not use `client-api.8slp.net/v1/devices/<DEVICE_ID>` with `{ "leftOn": true, "rightOn": true }` for power. It can return success while the app still reports the Pod as off.
 
 For alarms:
 ```typescript
