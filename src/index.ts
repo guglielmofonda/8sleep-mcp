@@ -42,6 +42,22 @@ async function main() {
         content: [{ type: 'text', text: JSON.stringify(await eightFunctions.setTemperature(userId, args.level, args.duration)) }]
     }));
 
+    server.tool('getHouseholdSummary', {}, async () => ({
+        content: [{ type: 'text', text: JSON.stringify(await eightFunctions.getHouseholdSummary(userId)) }]
+    }));
+
+    server.tool('getBedSideUsers', {}, async () => ({
+        content: [{ type: 'text', text: JSON.stringify(await eightFunctions.getBedSideUsers(userId)) }]
+    }));
+
+    server.tool('setSideTemperature', {
+        side: z.enum(['left', 'right']),
+        level: z.number(),
+        duration: z.number().optional()
+    }, async (args) => ({
+        content: [{ type: 'text', text: JSON.stringify(await eightFunctions.setSideTemperature(userId, args.side, args.level, args.duration)) }]
+    }));
+
     server.tool('getSleepData', sleepDataSchema, async (args) => ({
         content: [{ type: 'text', text: JSON.stringify(await eightFunctions.getSleepData(userId, args.startDate, args.endDate)) }]
     }));

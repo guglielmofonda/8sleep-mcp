@@ -1,5 +1,5 @@
 import { User, TemperatureData, SleepData, FunctionSchema } from './types.js';
-import { EightSleepClient, SleepScore, SleepStages, Alarm, DeviceStatus, TemperatureSchedule, UserPreferences } from './eight_sleep_client.js';
+import { EightSleepClient, SleepScore, SleepStages, Alarm, DeviceStatus, TemperatureSchedule, UserPreferences, HouseholdSideUser } from './eight_sleep_client.js';
 
 export class EightSleepFunctions {
   private client: EightSleepClient;
@@ -21,6 +21,21 @@ export class EightSleepFunctions {
       throw new Error('Temperature level must be between -100 and 100');
     }
     return await this.client.setTempLevel(userId, level, duration);
+  }
+
+  async getHouseholdSummary(userId: string): Promise<any> {
+    return await this.client.getHouseholdSummary(userId);
+  }
+
+  async getBedSideUsers(userId: string): Promise<HouseholdSideUser[]> {
+    return await this.client.getBedSideUsers(userId);
+  }
+
+  async setSideTemperature(userId: string, side: 'left' | 'right', level: number, duration: number = 0): Promise<{ message: string }> {
+    if (level < -100 || level > 100) {
+      throw new Error('Temperature level must be between -100 and 100');
+    }
+    return await this.client.setSideTempLevel(userId, side, level, duration);
   }
 
   async getSleepData(userId: string, startDate: string, endDate?: string): Promise<SleepData[]> {
@@ -207,6 +222,50 @@ export const FUNCTIONS: Record<string, FunctionSchema> = {
         }
       },
       required: ['level']
+    }
+  },
+  getHouseholdSummary: {
+    name: 'getHouseholdSummary',
+    description: 'Get household summary, including devices, household users, and side pairing data',
+    parameters: {
+      type: 'object',
+      properties: {},
+      required: []
+    }
+  },
+  getBedSideUsers: {
+    name: 'getBedSideUsers',
+    description: 'Get left/right side user IDs from household device pairing data. Use pairing, not assignment, for side-specific temperature control.',
+    parameters: {
+      type: 'object',
+      properties: {},
+      required: []
+    }
+  },
+  setSideTemperature: {
+    name: 'setSideTemperature',
+    description: 'Set temperature for a specific side of a shared Pod using household pairing.leftUserId/rightUserId and raw Eight Sleep level (-100 to 100)',
+    parameters: {
+      type: 'object',
+      properties: {
+        side: {
+          type: 'string',
+          description: 'Pod side to control',
+          enum: ['left', 'right']
+        },
+        level: {
+          type: 'integer',
+          description: 'Eight Sleep raw temperature level (-100 to 100), not literal Celsius/Fahrenheit',
+          minimum: -100,
+          maximum: 100
+        },
+        duration: {
+          type: 'integer',
+          description: 'Duration in seconds (0 for indefinite)',
+          default: 0
+        }
+      },
+      required: ['side', 'level']
     }
   },
   getSleepData: {

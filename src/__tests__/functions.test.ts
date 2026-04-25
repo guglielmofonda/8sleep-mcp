@@ -126,4 +126,49 @@ describe('EightSleepFunctions temperature controls', () => {
       .rejects
       .toThrow('Temperature level must be between -100 and 100');
   });
+
+  it('uses household pairing, not assignment, for side-specific temperature control', async () => {
+    appApi.get.mockResolvedValueOnce({
+      data: {
+        households: [{
+          users: [
+            { userId: 'left-user', role: 'PRIMARY', status: 'ACCEPTED' },
+            { userId: 'right-user', role: 'GUEST', status: 'ACCEPTED' },
+          ],
+          sets: [{
+            devices: [{
+              pairing: { leftUserId: 'left-user', rightUserId: 'right-user' },
+              // assignment can be stale/misleading; do not use it for side control.
+              assignment: { leftUserId: 'left-user', rightUserId: 'left-user' },
+            }],
+          }],
+        }],
+      },
+    });
+    appApi.put.mockResolvedValue({ data: {} });
+
+    const result = await eightFunctions.setSideTemperature('configured-user', 'right', -25, 28800);
+
+    expect(result).toEqual({
+      message: 'right side temperature updated successfully',
+      side: 'right',
+      level: -25,
+      duration: 28800,
+      role: 'GUEST',
+      status: 'ACCEPTED',
+    });
+    expect(appApi.get).toHaveBeenCalledWith('/household/users/configured-user/summary');
+    expect(appApi.put).toHaveBeenNthCalledWith(1, '/users/right-user/temperature', {
+      currentState: { type: 'smart' },
+    });
+    expect(appApi.put).toHaveBeenNthCalledWith(2, '/users/right-user/temperature', {
+      currentLevel: -25,
+    });
+    expect(appApi.put).toHaveBeenNthCalledWith(3, '/users/right-user/temperature', {
+      timeBased: {
+        level: -25,
+        durationSeconds: 28800,
+      },
+    });
+  });
 });
