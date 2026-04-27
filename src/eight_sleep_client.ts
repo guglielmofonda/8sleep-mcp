@@ -53,6 +53,13 @@ export interface UserPreferences {
   sleepGoal?: number;  // in minutes
 }
 
+export interface HouseholdSideUser {
+  side: 'left' | 'right';
+  userId: string;
+  role?: string;
+  status?: string;
+}
+
 export class EightSleepClient {
   private token: string | null = null;
   private userId: string | null = null;
@@ -236,6 +243,66 @@ export class EightSleepClient {
       }
       throw error;
     }
+  }
+
+  async getHouseholdSummary(userId: string): Promise<any> {
+    try {
+      const response = await this.appClient.get(`/household/users/${userId}/summary`);
+      return response.data;
+    } catch (error) {
+      if (error instanceof AxiosError) {
+        throw new Error(`Failed to get household summary: ${error.response?.data?.message || error.message}`);
+      }
+      throw error;
+    }
+  }
+
+  async getBedSideUsers(userId: string): Promise<HouseholdSideUser[]> {
+    const summary = await this.getHouseholdSummary(userId);
+    const household = summary.households?.[0];
+    const device = household?.sets?.[0]?.devices?.[0];
+    const pairing = device?.pairing;
+
+    if (!pairing?.leftUserId || !pairing?.rightUserId) {
+      throw new Error('Could not find left/right user IDs in household summary pairing data');
+    }
+
+    const users = household?.users ?? [];
+    const profileById = new Map<string, any>(users.map((user: any) => [user.userId, user]));
+
+    return [
+      {
+        side: 'left',
+        userId: pairing.leftUserId,
+        role: profileById.get(pairing.leftUserId)?.role,
+        status: profileById.get(pairing.leftUserId)?.status
+      },
+      {
+        side: 'right',
+        userId: pairing.rightUserId,
+        role: profileById.get(pairing.rightUserId)?.role,
+        status: profileById.get(pairing.rightUserId)?.status
+      }
+    ];
+  }
+
+  async setSideTempLevel(userId: string, side: 'left' | 'right', level: number, duration: number = 0): Promise<any> {
+    const sideUsers = await this.getBedSideUsers(userId);
+    const targetUser = sideUsers.find((user) => user.side === side);
+
+    if (!targetUser) {
+      throw new Error(`Could not find ${side} side user in household summary`);
+    }
+
+    await this.setTempLevel(targetUser.userId, level, duration);
+    return {
+      message: `${side} side temperature updated successfully`,
+      side,
+      level,
+      duration,
+      role: targetUser.role,
+      status: targetUser.status
+    };
   }
 
   async getSleepData(userId: string, startDate: string, endDate?: string): Promise<any[]> {

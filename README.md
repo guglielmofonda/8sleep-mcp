@@ -154,6 +154,15 @@ The server uses Eight Sleep's app API for temperature control:
 - Optional duration: same endpoint with `{ "timeBased": { "level": <raw_level>, "durationSeconds": <seconds> } }`
 - Turn off: same endpoint with `{ "currentState": { "type": "off" } }`
 
+For shared Pods, side-specific control must first resolve the side's user ID from household pairing data:
+
+- `GET https://app-api.8slp.net/v1/household/users/<USER_ID>/summary`
+- Use `households[0].sets[0].devices[0].pairing.leftUserId` for the left side
+- Use `households[0].sets[0].devices[0].pairing.rightUserId` for the right side
+- Then call the same app API temperature endpoint with that side-specific user ID
+
+Do **not** use `assignment.leftUserId/rightUserId` for side-specific temperature writes. Live testing found `assignment` can be misleading and point both sides to the same user, while `pairing` correctly held distinct left/right users.
+
 Do not use `client-api.8slp.net/v1/devices/<DEVICE_ID>` with `{ "leftOn": true, "rightOn": true }` for power. It can return success while the app still reports the Pod as off.
 
 For alarms:

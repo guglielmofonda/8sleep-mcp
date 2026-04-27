@@ -119,6 +119,15 @@ The same app API endpoint is also the working path for temperature control:
   { "timeBased": { "level": -50, "durationSeconds": 28800 } }
   ```
 
+For shared Pods with a guest/partner, resolve the side user from the household summary before writing temperature:
+
+- `GET https://app-api.8slp.net/v1/household/users/YOUR_USER_ID/summary`
+- Use `device.pairing.leftUserId` for the left side
+- Use `device.pairing.rightUserId` for the right side
+- Then PUT to `https://app-api.8slp.net/v1/users/<SIDE_USER_ID>/temperature`
+
+Do not use `device.assignment.leftUserId/rightUserId` for side temperature writes. Live testing found `assignment` can point both sides to the same user after adding a guest, while `pairing` correctly contained distinct left/right users.
+
 Eight Sleep temperature values are raw levels from `-100` to `100`, not literal °C/°F. Known useful mappings: `-50 ≈ 21°C`, `-25 ≈ 24°C`, `-8 ≈ 26°C`, `0 ≈ 27°C`.
 
 Do not use `client-api.8slp.net/v1/devices/<DEVICE_ID>` with `leftOn`/`rightOn` for Pod power. It can return success without changing the Pod state in the app.
