@@ -1,28 +1,36 @@
 # Eight Sleep MCP — Personal Setup Guide
 
-## My Use Case
+## What this is for
 
-When the **Bedroom Gu** Philips Hue lights turn on between 6–10am, the Eight Sleep Pod 3 automatically turns off. The chain:
+This repo is configured for Gu's current setup:
+- Hermes native MCP access to Eight Sleep
+- overnight cron-job automation
+- shared Pod side-specific temperature control when needed
+- morning shutdown automation through HomeKit / Shortcuts if desired
 
-```
-Philips Hue light turns on (6–10am)
-  → HomeKit detects the event
-    → HomeKit automation triggers Apple Shortcut
-      → "Turn Off Eight Sleep" Shortcut hits Eight Sleep API
-        → Pod 3 turns off (~5–15 second latency)
-```
+## Core API facts
 
-Claude Desktop also has full MCP access to Eight Sleep — all 24 tools — for querying sleep data, controlling temperature, managing alarms, etc.
+- Temperature values are **raw levels** from `-100` to `100`, not literal °C/°F.
+- Working control path:
+  `PUT https://app-api.8slp.net/v1/users/<USER_ID>/temperature`
+- For shared Pods, resolve side users from household pairing data:
+  - `pairing.leftUserId`
+  - `pairing.rightUserId`
+- Do **not** use `assignment.leftUserId/rightUserId` for side-specific writes.
+- Do **not** rely on `client-api.8slp.net/v1/devices/<DEVICE_ID>` with `leftOn/rightOn` for power control.
 
----
+Useful raw-level reference:
 
-## Phase 1: MCP Server (Claude Desktop)
+| Celsius | Raw level |
+|---:|---:|
+| 21°C | -50 |
+| 24°C | -25 |
+| 26°C | -8 |
+| 27°C | 0 |
 
-### What this repo is
+## Hermes MCP setup
 
-A fork of [`elizabethtrykin/8sleep-mcp`](https://github.com/elizabethtrykin/8sleep-mcp) with a critical bug fixed: the original only registered 8 of 24 defined tools. This fork registers all 24, including the missing `setDevicePower` needed for the automation.
-
-### Install & build
+### 1) Build the repo
 
 ```bash
 cd ~/Code/8sleep-mcp
@@ -30,145 +38,106 @@ npm install
 npm run build
 ```
 
-### Get your User ID
+### 2) Create a secrets file
 
 ```bash
-curl -s -X POST https://auth-api.8slp.net/v1/tokens \
-  -H "Content-Type: application/json" \
-  -d '{
-    "client_id": "0894c7f33bb94800a03f1f4df13a4f38",
-    "client_secret": "f0954a3ed5763ba3d06834c73731a32f15f168f47d4f164751275def86db0c76",
-    "grant_type": "password",
-    "username": "YOUR_EMAIL",
-    "password": "YOUR_PASSWORD"
-  }'
+mkdir -p ~/.hermes-athena/secrets
+chmod 700 ~/.hermes-athena/secrets
 ```
 
-The response contains `userId` and `access_token`. Save the `userId`.
+Create `~/.hermes-athena/secrets/eight_sleep.env`:
 
-### Claude Desktop config
-
-Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "eight_sleep": {
-      "command": "node",
-      "args": ["/Users/guglielmofonda/Code/8sleep-mcp/build/index.js"],
-      "env": {
-        "EIGHT_SLEEP_EMAIL": "YOUR_EMAIL",
-        "EIGHT_SLEEP_PASSWORD": "YOUR_PASSWORD",
-        "EIGHT_SLEEP_USER_ID": "YOUR_USER_ID"
-      }
-    }
-  }
-}
+```env
+EIGHT_SLEEP_EMAIL="your_email@example.com"
+EIGHT_SLEEP_PASSWORD="your_password"
+EIGHT_SLEEP_USER_ID="your_user_id"
 ```
 
-> **Note:** No JSON comments allowed — the config parser rejects them. All three env vars are required; the code throws if email/password are missing even though README implies userId alone suffices.
+### 3) Create the wrapper script
 
-Quit Claude Desktop fully (Cmd+Q), reopen, confirm 24 tools appear under the hammer icon.
+Create `~/.hermes-athena/secrets/run-eight-sleep-mcp.sh`:
 
----
+```bash
+#!/bin/sh
+set -eu
+. ~/.hermes-athena/secrets/eight_sleep.env
+export EIGHT_SLEEP_EMAIL EIGHT_SLEEP_PASSWORD EIGHT_SLEEP_USER_ID
+exec node ~/Code/8sleep-mcp/build/index.js
+```
 
-## Phase 2: Apple Shortcut — "Turn Off Eight Sleep"
+Then:
 
-Create this in the Shortcuts app. It makes two HTTP calls:
+```bash
+chmod 700 ~/.hermes-athena/secrets/run-eight-sleep-mcp.sh
+```
 
-### Step 1: Authenticate
+### 4) Add Hermes config
 
-- **Action:** Get Contents of URL
-- **URL:** `https://auth-api.8slp.net/v1/tokens`
-- **Method:** POST
-- **Body (JSON):**
-  ```json
-  {
-    "client_id": "0894c7f33bb94800a03f1f4df13a4f38",
-    "client_secret": "f0954a3ed5763ba3d06834c73731a32f15f168f47d4f164751275def86db0c76",
-    "grant_type": "password",
-    "username": "YOUR_EMAIL",
-    "password": "YOUR_PASSWORD"
-  }
-  ```
-- **Next action:** Get Dictionary Value → key `access_token` → save as variable `authToken`
+Add the server to `~/.hermes/config.yaml` and mirror it into `~/.hermes-athena/config.yaml` if both are used:
 
-### Step 2: Turn off pod
+```yaml
+mcp_servers:
+  eight_sleep:
+    command: "/Users/guglielmofondq/.hermes-athena/secrets/run-eight-sleep-mcp.sh"
+    args: []
+    timeout: 120
+    connect_timeout: 60
+```
 
-- **Action:** Get Contents of URL
-- **URL:** `https://app-api.8slp.net/v1/users/YOUR_USER_ID/temperature`
-- **Method:** PUT
-- **Headers:** `Authorization: Bearer [authToken variable]`
-- **Body (JSON):**
-  ```json
-  { "currentState": { "type": "off" } }
-  ```
+Restart Hermes after editing the config.
 
-The same app API endpoint is also the working path for temperature control:
+## Overnight cron-job pattern
 
-- Turn on temperature control:
-  ```json
-  { "currentState": { "type": "smart" } }
-  ```
-- Set target level:
-  ```json
-  { "currentLevel": -50 }
-  ```
-- Optional timed hold:
-  ```json
-  { "timeBased": { "level": -50, "durationSeconds": 28800 } }
-  ```
+Use **small recurring cron jobs** instead of one giant always-on job.
 
-Eight Sleep temperature values are raw levels from `-100` to `100`, not literal °C/°F. Known useful mappings: `-50 ≈ 21°C`, `-25 ≈ 24°C`, `-8 ≈ 26°C`, `0 ≈ 27°C`.
+Recommended slices:
+- 21:30 — bedtime start
+- 23:30 — step 2
+- 00:30 — step 3
+- 06:45 — wake ramp
+- 07:30 — turn off
 
-Do not use `client-api.8slp.net/v1/devices/<DEVICE_ID>` with `leftOn`/`rightOn` for Pod power. It can return success without changing the Pod state in the app.
+Recommended prompt guardrails:
+- `Do not create any new cron jobs.`
+- keep each job self-contained
+- use `deliver: local` unless a message is wanted
+- for jobs after midnight, treat them as part of the night that started the previous day
 
-### Step 3 (optional): Notification
+Weekly pattern used here:
+- Mon / Wed / Fri / Sun = solo night
+- Thu / Sat = couple night
+- Tue = off
 
-- **Action:** Show Notification → "Eight Sleep turned off"
+Example prompt:
 
-Test by running the shortcut manually and confirming the pod turns off.
+```text
+Tonight's Eight Sleep job.
 
----
+Rules:
+- Do not create any new cron jobs.
+- If tonight is a solo night, use the solo temperature plan.
+- If tonight is a couple night, use side-specific temperature control.
+- If tonight is Tuesday, do nothing.
+- For after-midnight jobs, keep using the night that started the previous day.
+- Verify Pod state before changing anything.
+```
 
-## Phase 3: HomeKit Automation
+## Optional morning shutdown automation
 
-**Prerequisite:** A Home Hub (HomePod, Apple TV, or iPad) must be set up — required for automations to run without your phone present.
+If you want the Pod to turn off automatically in the morning:
 
-### Steps
+1. Home app → Automation → new automation
+2. Trigger Bedroom Gu light turning on
+3. Add time window if desired
+4. Run a Shortcut that calls the Eight Sleep app API and sends `{ "currentState": { "type": "off" } }`
+5. Turn off "Ask Before Running"
 
-1. Open **Home app** → **Automation** tab → **+** New Automation
-2. Trigger: **An Accessory is Controlled** → select **Bedroom Gu** → **When it turns on**
-3. Time condition: **Between 6:00 AM and 10:00 AM**
-4. Action: **Convert to Shortcut** → add **Run Shortcut** → select **Turn Off Eight Sleep**
-5. **Toggle OFF "Ask Before Running"** — critical, otherwise it prompts every time
-6. Save
+## Useful repo notes
 
----
+- The repo intentionally keeps the app-api control path documented because it is the reliable one.
+- Side control should always resolve via household pairing, not assignment.
+- If a change looks like it worked but the Pod state did not change, verify with `getTemperature` / `getDeviceStatus`.
 
-## Troubleshooting
+## Fork attribution
 
-| Problem | Fix |
-|---|---|
-| Claude Desktop shows only 8 tools | Rebuild: `npm run build` in `8sleep-mcp/`. Check config path is absolute. |
-| Auth API returns 401 | Wrong email/password, or Eight Sleep account uses SSO (Google/Apple login) — set a password via the Eight Sleep app first |
-| Shortcut fails | Run manually with Shortcuts debug; check `access_token` variable is populated |
-| HomeKit automation doesn't fire | Confirm Home Hub is online. Check "Ask Before Running" is OFF. Test outside 6–10am window won't trigger — expected |
-| Pod doesn't turn off | Use `app-api.8slp.net/v1/users/YOUR_USER_ID/temperature` with `{ "currentState": { "type": "off" } }`; the old `client-api /devices` `leftOn`/`rightOn` path can return false success |
-| ~15 second delay | Normal — Hue Bridge → HomeKit → Shortcut → API chain. Not reduceable easily |
-
----
-
-## Bug Fixed vs Original
-
-`src/index.ts` in the original repo only called `server.tool()` for 8 functions, leaving 16 defined-but-unreachable:
-
-| Added | Category |
-|---|---|
-| `getAlarms`, `setAlarm`, `updateAlarm`, `deleteAlarm` | Alarms |
-| `getDeviceStatus`, `setDevicePower` | Device control |
-| `getRespiratoryRate`, `getHeartRate`, `getSleepTiming`, `getSleepFitnessTrends` | Sleep data |
-| `getTemperatureSchedules`, `setTemperatureSchedule`, `updateTemperatureSchedule`, `deleteTemperatureSchedule` | Temperature scheduling |
-| `getUserPreferences`, `updateUserPreferences` | Preferences |
-
-Void-returning tools now return confirmation messages instead of `undefined`.
+This repo is a fork of [`elizabethtrykin/8sleep-mcp`](https://github.com/elizabethtrykin/8sleep-mcp). The Hermes wrapper and setup pattern here were adapted from that project for Gu's current workflow.
