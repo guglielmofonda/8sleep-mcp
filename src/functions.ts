@@ -190,13 +190,13 @@ export const FUNCTIONS: Record<string, FunctionSchema> = {
   },
   setTemperature: {
     name: 'setTemperature',
-    description: 'Set temperature for the configured user',
+    description: 'Set temperature for the configured user using Eight Sleep raw level (-100 to 100; e.g. -50 ≈ 21°C, -25 ≈ 24°C, -8 ≈ 26°C)',
     parameters: {
       type: 'object',
       properties: {
         level: {
           type: 'integer',
-          description: 'Temperature level (-100 to 100)',
+          description: 'Eight Sleep raw temperature level (-100 to 100), not literal Celsius/Fahrenheit',
           minimum: -100,
           maximum: 100
         },
@@ -474,7 +474,7 @@ export const FUNCTIONS: Record<string, FunctionSchema> = {
         },
         level: {
           type: 'integer',
-          description: 'Temperature level (-100 to 100)',
+          description: 'Eight Sleep raw temperature level (-100 to 100), not literal Celsius/Fahrenheit',
           minimum: -100,
           maximum: 100
         },
@@ -507,7 +507,7 @@ export const FUNCTIONS: Record<string, FunctionSchema> = {
         },
         level: {
           type: 'integer',
-          description: 'Temperature level (-100 to 100)',
+          description: 'Eight Sleep raw temperature level (-100 to 100), not literal Celsius/Fahrenheit',
           minimum: -100,
           maximum: 100
         },

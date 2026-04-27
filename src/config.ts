@@ -1,10 +1,11 @@
-import dotenv from 'dotenv';
+import * as dotenv from 'dotenv';
 
 dotenv.config();
 
 export const config = {
   api: {
     baseUrl: 'https://client-api.8slp.net/v1',
+    appUrl: 'https://app-api.8slp.net/v1',
     authUrl: 'https://auth-api.8slp.net/v1/tokens',
   },
   auth: {
